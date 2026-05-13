@@ -134,27 +134,24 @@ CLASS_INFO = {
 }
 
 # ── Model loading ─────────────────────────────────────────────────────────────
-# ── Model loading ─────────────────────────────────────────────────────────────
 _model = None
-MODEL_PATH = "eye_model_v2.keras"
-GDRIVE_FILE_ID = "1RoH_vGu65CufzsQRSZM8ojz9oa2U04YA"
+WEIGHTS_PATH = "eye_weights.weights.h5"
+GDRIVE_FILE_ID = "1pT1tv8UNTLU8UTDA5fw9BnpkkxDE8y9O"
 
 
-def download_model_from_gdrive():
-    """Download model from Google Drive if not present locally."""
-    if os.path.exists(MODEL_PATH):
-        logger.info(f"Model already exists at {MODEL_PATH}")
+def download_weights_from_gdrive():
+    """Download weights file from Google Drive if not present."""
+    if os.path.exists(WEIGHTS_PATH):
+        logger.info(f"Weights already exist at {WEIGHTS_PATH}")
         return True
 
-    logger.info("Downloading model from Google Drive...")
+    logger.info("Downloading weights from Google Drive...")
     try:
         import requests
-        url = f"https://drive.google.com/uc?export=download&id={GDRIVE_FILE_ID}"
-
         session = requests.Session()
+        url = f"https://drive.google.com/uc?export=download&id={GDRIVE_FILE_ID}"
         response = session.get(url, stream=True)
 
-        # Handle Google Drive virus scan warning for large files
         for key, value in response.cookies.items():
             if key.startswith("download_warning"):
                 url = f"https://drive.google.com/uc?export=download&id={GDRIVE_FILE_ID}&confirm={value}"
@@ -162,116 +159,81 @@ def download_model_from_gdrive():
                 break
 
         if response.status_code != 200:
-            logger.error(f"Failed to download model: HTTP {response.status_code}")
+            logger.error(f"Download failed: HTTP {response.status_code}")
             return False
 
         total = 0
-        with open(MODEL_PATH, "wb") as f:
+        with open(WEIGHTS_PATH, "wb") as f:
             for chunk in response.iter_content(chunk_size=32768):
                 if chunk:
                     f.write(chunk)
                     total += len(chunk)
 
         size_mb = total / (1024 * 1024)
-        logger.info(f"Model downloaded successfully: {size_mb:.1f} MB")
+        logger.info(f"Weights downloaded: {size_mb:.1f} MB")
         return True
 
     except Exception as e:
-        logger.error(f"Model download failed: {e}")
-        if os.path.exists(MODEL_PATH):
-            os.remove(MODEL_PATH)
+        logger.error(f"Weights download failed: {e}")
+        if os.path.exists(WEIGHTS_PATH):
+            os.remove(WEIGHTS_PATH)
         return False
 
 
+def build_model():
+    """
+    Rebuild MobileNetV2 architecture in code.
+    No file format issues — architecture defined here not loaded from file.
+    Must match exactly what was used during training.
+    """
+    import tensorflow as tf
+    from tensorflow.keras.applications import MobileNetV2
+    from tensorflow.keras.layers import GlobalAveragePooling2D, Dense, Dropout
+    from tensorflow.keras.models import Model
+
+    base = MobileNetV2(
+        input_shape=(224, 224, 3),
+        include_top=False,
+        weights=None
+    )
+    x = base.output
+    x = GlobalAveragePooling2D()(x)
+    x = Dense(256, activation="relu")(x)
+    x = Dropout(0.4)(x)
+    x = Dense(128, activation="relu")(x)
+    x = Dropout(0.3)(x)
+    output = Dense(8, activation="sigmoid")(x)
+    model = Model(inputs=base.input, outputs=output)
+    return model
+
+
 def load_model():
-    """Load the trained model. Cached after first load."""
+    """
+    Build architecture in code, download weights, load weights.
+    Bypasses all Keras version compatibility issues completely.
+    """
     global _model
     if _model is not None:
         return _model
 
-    if not os.path.exists(MODEL_PATH):
-        success = download_model_from_gdrive()
+    if not os.path.exists(WEIGHTS_PATH):
+        success = download_weights_from_gdrive()
         if not success:
-            logger.warning("Model unavailable. Using rule-based fallback.")
+            logger.warning("Weights unavailable. Using rule-based fallback.")
             return None
 
     try:
         import tensorflow as tf
-        logger.info("Loading model into memory...")
-        _model = tf.keras.models.load_model(MODEL_PATH, compile=False)
-        logger.info(f"Model loaded successfully from {MODEL_PATH}")
+        logger.info("Building MobileNetV2 architecture...")
+        model = build_model()
+        logger.info("Loading weights into model...")
+        model.load_weights(WEIGHTS_PATH)
+        _model = model
+        logger.info("Model ready — weights loaded successfully!")
         return _model
     except Exception as e:
-        logger.error(f"Failed to load model: {e}")
+        logger.error(f"Failed to load weights: {e}")
         return None
-
-# def load_model():
-#     """Load the trained model. Cached after first load."""
-#     global _model
-#     if _model is not None:
-#         return _model
-
-#     # Try to download if not present
-#     if not os.path.exists(MODEL_PATH):
-#         success = download_model_from_gdrive()
-#         if not success:
-#             logger.warning("Model unavailable. Using rule-based fallback.")
-#             return None
-
-#     try:
-#         import tensorflow as tf
-#         logger.info("Loading model into memory...")
-
-#         # Try standard load first
-#         try:
-#             _model = tf.keras.models.load_model(MODEL_PATH)
-#             logger.info("Model loaded successfully (standard)")
-#             return _model
-#         except Exception as e1:
-#             logger.warning(f"Standard load failed: {e1} — trying legacy mode")
-
-#         # Try legacy Keras H5 load
-#         try:
-#             _model = tf.keras.models.load_model(
-#                 MODEL_PATH,
-#                 compile=False
-#             )
-#             logger.info("Model loaded successfully (compile=False)")
-#             return _model
-#         except Exception as e2:
-#             logger.warning(f"compile=False load failed: {e2} — trying custom_objects")
-
-#         # Try with custom input layer fix
-#         try:
-#             import h5py
-#             from tensorflow.keras.models import Model
-#             from tensorflow.keras.layers import Input
-
-#             with h5py.File(MODEL_PATH, "r") as f:
-#                 model_config = f.attrs.get("model_config")
-
-#             if model_config:
-#                 import json
-#                 config = json.loads(model_config)
-#                 # Fix batch_shape → shape in InputLayer
-#                 config_str = json.dumps(config).replace(
-#                     '"batch_shape"', '"shape"'
-#                 )
-#                 fixed_config = json.loads(config_str)
-#                 _model = tf.keras.models.model_from_json(
-#                     json.dumps(fixed_config)
-#                 )
-#                 _model.load_weights(MODEL_PATH)
-#                 logger.info("Model loaded successfully (batch_shape fix)")
-#                 return _model
-#         except Exception as e3:
-#             logger.error(f"All load methods failed: {e3}")
-
-#         return None
-
-#     except Exception as e:
-#         logger.error(f"Failed to load model: {e}")
-#         return None
 
 
 # ── Image processing ──────────────────────────────────────────────────────────
@@ -313,7 +275,7 @@ def check_image_quality(image: np.ndarray) -> dict:
     brightness = float(np.mean(gray))
 
     issues = []
-    if blur_score < 10:          # lowered from 50 → webcam images pass through
+    if blur_score < 10:
         issues.append("too blurry")
     if brightness < 30:
         issues.append("too dark")
@@ -347,11 +309,9 @@ def classify_with_model(image: np.ndarray) -> dict:
         img_input = preprocess_for_model(image)
         predictions = model.predict(img_input, verbose=0)[0]
 
-        # Get top prediction
         top_idx = int(np.argmax(predictions))
         confidence = float(predictions[top_idx]) * 100
 
-        # Get top 3 predictions for context
         top3_idx = np.argsort(predictions)[::-1][:3]
         top3 = [
             {
@@ -364,7 +324,6 @@ def classify_with_model(image: np.ndarray) -> dict:
         condition = CLASS_NAMES[top_idx]
         info = CLASS_INFO[condition]
 
-        # Compute image metrics for display
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
         lower_red1 = np.array([0, 50, 50])
         upper_red1 = np.array([10, 255, 255])
@@ -462,10 +421,8 @@ def analyze_eye_image(base64_image: str) -> dict:
     4. Run ML model (or fallback)
     5. Return result
     """
-    # Step 1 — decode
     image = decode_base64_image(base64_image)
 
-    # Step 2 — quality check
     quality = check_image_quality(image)
     if not quality["usable"]:
         return {
@@ -489,10 +446,6 @@ def analyze_eye_image(base64_image: str) -> dict:
             "model_used": "Quality check"
         }
 
-    # Step 3 — detect eye region
     eye_region = detect_eye_region(image)
-
-    # Step 4 — classify with ML model (falls back to rules if model unavailable)
     result = classify_with_model(eye_region)
-
     return result

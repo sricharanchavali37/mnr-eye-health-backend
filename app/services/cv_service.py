@@ -136,8 +136,8 @@ CLASS_INFO = {
 # ── Model loading ─────────────────────────────────────────────────────────────
 # ── Model loading ─────────────────────────────────────────────────────────────
 _model = None
-MODEL_PATH = "eye_model.h5"
-GDRIVE_FILE_ID = "14DfD3P06z0Bxr4fvNRHMt0PjXvOzPQ8L"
+MODEL_PATH = "eye_model_v2.keras"
+GDRIVE_FILE_ID = "1RoH_vGu65CufzsQRSZM8ojz9oa2U04YA"
 
 
 def download_model_from_gdrive():
@@ -189,7 +189,6 @@ def load_model():
     if _model is not None:
         return _model
 
-    # Try to download if not present
     if not os.path.exists(MODEL_PATH):
         success = download_model_from_gdrive()
         if not success:
@@ -199,57 +198,80 @@ def load_model():
     try:
         import tensorflow as tf
         logger.info("Loading model into memory...")
-
-        # Try standard load first
-        try:
-            _model = tf.keras.models.load_model(MODEL_PATH)
-            logger.info("Model loaded successfully (standard)")
-            return _model
-        except Exception as e1:
-            logger.warning(f"Standard load failed: {e1} — trying legacy mode")
-
-        # Try legacy Keras H5 load
-        try:
-            _model = tf.keras.models.load_model(
-                MODEL_PATH,
-                compile=False
-            )
-            logger.info("Model loaded successfully (compile=False)")
-            return _model
-        except Exception as e2:
-            logger.warning(f"compile=False load failed: {e2} — trying custom_objects")
-
-        # Try with custom input layer fix
-        try:
-            import h5py
-            from tensorflow.keras.models import Model
-            from tensorflow.keras.layers import Input
-
-            with h5py.File(MODEL_PATH, "r") as f:
-                model_config = f.attrs.get("model_config")
-
-            if model_config:
-                import json
-                config = json.loads(model_config)
-                # Fix batch_shape → shape in InputLayer
-                config_str = json.dumps(config).replace(
-                    '"batch_shape"', '"shape"'
-                )
-                fixed_config = json.loads(config_str)
-                _model = tf.keras.models.model_from_json(
-                    json.dumps(fixed_config)
-                )
-                _model.load_weights(MODEL_PATH)
-                logger.info("Model loaded successfully (batch_shape fix)")
-                return _model
-        except Exception as e3:
-            logger.error(f"All load methods failed: {e3}")
-
-        return None
-
+        _model = tf.keras.models.load_model(MODEL_PATH, compile=False)
+        logger.info(f"Model loaded successfully from {MODEL_PATH}")
+        return _model
     except Exception as e:
         logger.error(f"Failed to load model: {e}")
         return None
+
+# def load_model():
+#     """Load the trained model. Cached after first load."""
+#     global _model
+#     if _model is not None:
+#         return _model
+
+#     # Try to download if not present
+#     if not os.path.exists(MODEL_PATH):
+#         success = download_model_from_gdrive()
+#         if not success:
+#             logger.warning("Model unavailable. Using rule-based fallback.")
+#             return None
+
+#     try:
+#         import tensorflow as tf
+#         logger.info("Loading model into memory...")
+
+#         # Try standard load first
+#         try:
+#             _model = tf.keras.models.load_model(MODEL_PATH)
+#             logger.info("Model loaded successfully (standard)")
+#             return _model
+#         except Exception as e1:
+#             logger.warning(f"Standard load failed: {e1} — trying legacy mode")
+
+#         # Try legacy Keras H5 load
+#         try:
+#             _model = tf.keras.models.load_model(
+#                 MODEL_PATH,
+#                 compile=False
+#             )
+#             logger.info("Model loaded successfully (compile=False)")
+#             return _model
+#         except Exception as e2:
+#             logger.warning(f"compile=False load failed: {e2} — trying custom_objects")
+
+#         # Try with custom input layer fix
+#         try:
+#             import h5py
+#             from tensorflow.keras.models import Model
+#             from tensorflow.keras.layers import Input
+
+#             with h5py.File(MODEL_PATH, "r") as f:
+#                 model_config = f.attrs.get("model_config")
+
+#             if model_config:
+#                 import json
+#                 config = json.loads(model_config)
+#                 # Fix batch_shape → shape in InputLayer
+#                 config_str = json.dumps(config).replace(
+#                     '"batch_shape"', '"shape"'
+#                 )
+#                 fixed_config = json.loads(config_str)
+#                 _model = tf.keras.models.model_from_json(
+#                     json.dumps(fixed_config)
+#                 )
+#                 _model.load_weights(MODEL_PATH)
+#                 logger.info("Model loaded successfully (batch_shape fix)")
+#                 return _model
+#         except Exception as e3:
+#             logger.error(f"All load methods failed: {e3}")
+
+#         return None
+
+#     except Exception as e:
+#         logger.error(f"Failed to load model: {e}")
+#         return None
 
 
 # ── Image processing ──────────────────────────────────────────────────────────

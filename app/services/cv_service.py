@@ -134,8 +134,53 @@ CLASS_INFO = {
 }
 
 # ── Model loading ─────────────────────────────────────────────────────────────
+# ── Model loading ─────────────────────────────────────────────────────────────
 _model = None
 MODEL_PATH = "eye_model.h5"
+GDRIVE_FILE_ID = "14DfD3P06z0Bxr4fvNRHMt0PjXvOzPQ8L"
+
+
+def download_model_from_gdrive():
+    """Download model from Google Drive if not present locally."""
+    if os.path.exists(MODEL_PATH):
+        logger.info(f"Model already exists at {MODEL_PATH}")
+        return True
+
+    logger.info("Downloading model from Google Drive...")
+    try:
+        import requests
+        url = f"https://drive.google.com/uc?export=download&id={GDRIVE_FILE_ID}"
+
+        session = requests.Session()
+        response = session.get(url, stream=True)
+
+        # Handle Google Drive virus scan warning for large files
+        for key, value in response.cookies.items():
+            if key.startswith("download_warning"):
+                url = f"https://drive.google.com/uc?export=download&id={GDRIVE_FILE_ID}&confirm={value}"
+                response = session.get(url, stream=True)
+                break
+
+        if response.status_code != 200:
+            logger.error(f"Failed to download model: HTTP {response.status_code}")
+            return False
+
+        total = 0
+        with open(MODEL_PATH, "wb") as f:
+            for chunk in response.iter_content(chunk_size=32768):
+                if chunk:
+                    f.write(chunk)
+                    total += len(chunk)
+
+        size_mb = total / (1024 * 1024)
+        logger.info(f"Model downloaded successfully: {size_mb:.1f} MB")
+        return True
+
+    except Exception as e:
+        logger.error(f"Model download failed: {e}")
+        if os.path.exists(MODEL_PATH):
+            os.remove(MODEL_PATH)
+        return False
 
 
 def load_model():
@@ -144,17 +189,18 @@ def load_model():
     if _model is not None:
         return _model
 
+    # Try to download if not present
     if not os.path.exists(MODEL_PATH):
-        logger.warning(
-            f"Model file not found at {MODEL_PATH}. "
-            "Using rule-based fallback."
-        )
-        return None
+        success = download_model_from_gdrive()
+        if not success:
+            logger.warning("Model unavailable. Using rule-based fallback.")
+            return None
 
     try:
         import tensorflow as tf
+        logger.info("Loading model into memory...")
         _model = tf.keras.models.load_model(MODEL_PATH)
-        logger.info(f"Model loaded from {MODEL_PATH}")
+        logger.info(f"Model loaded successfully from {MODEL_PATH}")
         return _model
     except Exception as e:
         logger.error(f"Failed to load model: {e}")
